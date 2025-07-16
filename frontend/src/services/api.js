@@ -1,147 +1,118 @@
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
-// Get JWT token from localStorage
-const getAuthToken = () => {
-  const user = localStorage.getItem('user');
-  if (user) {
-    const userData = JSON.parse(user);
-    return userData.token;
+// Enhanced error handling
+class APIError extends Error {
+  constructor(message, status, data) {
+    super(message);
+    this.name = 'APIError';
+    this.status = status;
+    this.data = data;
   }
-  return null;
+}
+
+// Improved token management
+const getAuthToken = () => {
+  try {
+    const user = localStorage.getItem('user');
+    return user ? JSON.parse(user).token : null;
+  } catch (error) {
+    console.error('Error parsing user data:', error);
+    return null;
+  }
 };
 
-// Generic API call function
+// Enhanced API call function
 const apiCall = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
   const token = getAuthToken();
 
+  const defaultHeaders = {
+    'Content-Type': 'application/json',
+    ...(token && { 'Authorization': `Bearer ${token}` }),
+  };
+
   const config = {
+    method: 'GET', // default method
+    headers: defaultHeaders,
+    credentials: 'include', // for cookies if using them
+    ...options,
     headers: {
-      'Content-Type': 'application/json',
-      ...(token && { 'Authorization': `Bearer ${token}` }),
+      ...defaultHeaders,
       ...options.headers,
     },
-    ...options,
   };
+
+  // Handle request body
+  if (options.body && typeof options.body === 'object') {
+    config.body = JSON.stringify(options.body);
+  }
 
   try {
     const response = await fetch(url, config);
-    const data = await response.json();
+    let data;
+    
+    try {
+      data = await response.json();
+    } catch (e) {
+      data = { error: response.statusText };
+    }
 
     if (!response.ok) {
-      // Handle token expiration
+      // Handle specific error cases
       if (response.status === 401 || response.status === 403) {
         localStorage.removeItem('user');
-        window.location.href = '/';
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
       }
-      throw new Error(data.error || `HTTP error! status: ${response.status}`);
+      throw new APIError(
+        data.message || `Request failed with status ${response.status}`,
+        response.status,
+        data
+      );
     }
 
     return data;
   } catch (error) {
-    console.error('API call error:', error);
+    console.error(`API call to ${endpoint} failed:`, error);
     throw error;
   }
 };
 
-// Authentication API calls
+// Auth API with better structure
 export const authAPI = {
-  // Register a new user
-  register: async (userData) => {
+  register: async ({ firstName, lastName, email, password }) => {
     return apiCall('/users/register', {
       method: 'POST',
-      body: JSON.stringify(userData),
+      body: { firstName, lastName, email, password },
     });
   },
 
-  // Login user
-  login: async (credentials) => {
+  login: async ({ email, password }) => {
     return apiCall('/users/login', {
       method: 'POST',
-      body: JSON.stringify(credentials),
+      body: { email, password },
     });
   },
 
-  // Get user profile
-  getProfile: async () => {
-    return apiCall('/users/profile');
-  },
-
-  // Update user profile
-  updateProfile: async (profileData) => {
-    return apiCall('/users/profile', {
-      method: 'PUT',
-      body: JSON.stringify(profileData),
-    });
-  },
-
-  // Get all users (admin)
-  getAllUsers: async () => {
-    return apiCall('/users/all');
-  },
-
-  // Get user statistics
-  getUserStats: async () => {
-    return apiCall('/users/stats');
-  },
-
-  // Delete user account
-  deleteAccount: async () => {
-    return apiCall('/users/account', {
-      method: 'DELETE',
-    });
-  },
+  getProfile: async () => apiCall('/users/profile'),
+  updateProfile: async (profileData) => apiCall('/users/profile', { method: 'PUT', body: profileData }),
+  deleteAccount: async () => apiCall('/users/account', { method: 'DELETE' }),
 };
 
-// Stock API calls
+// Stock API
 export const stockAPI = {
-  // Get all stocks
-  getStocks: async (refresh = false) => {
-    return apiCall(`/stocks${refresh ? '?refresh=true' : ''}`);
-  },
-
-  // Get specific stock by symbol
-  getStock: async (symbol) => {
-    return apiCall(`/stocks/${symbol}`);
-  },
-
-  // Search stocks
-  searchStocks: async (query) => {
-    return apiCall(`/stocks/search?q=${encodeURIComponent(query)}`);
-  },
-
-  // Get chart data for a stock
-  getChartData: async (symbol, interval = '5min') => {
-    return apiCall(`/stocks/${symbol}/chart?interval=${interval}`);
-  },
+  getStocks: (refresh = false) => apiCall(`/stocks${refresh ? '?refresh=true' : ''}`),
+  getStock: (symbol) => apiCall(`/stocks/${symbol}`),
+  searchStocks: (query) => apiCall(`/stocks/search?q=${encodeURIComponent(query)}`),
+  getChartData: (symbol, interval = '5min') => apiCall(`/stocks/${symbol}/chart?interval=${interval}`),
 };
 
-// Portfolio API calls
+// Portfolio API
 export const portfolioAPI = {
-  // Get user portfolio
-  getPortfolio: async (userId) => {
-    return apiCall(`/portfolio/${userId}`);
-  },
-
-  // Buy stock
-  buyStock: async (stockData) => {
-    return apiCall('/portfolio/buy', {
-      method: 'POST',
-      body: JSON.stringify(stockData),
-    });
-  },
-
-  // Sell stock
-  sellStock: async (stockData) => {
-    return apiCall('/portfolio/sell', {
-      method: 'POST',
-      body: JSON.stringify(stockData),
-    });
-  },
+  getPortfolio: (userId) => apiCall(`/portfolio/${userId}`),
+  buyStock: (stockData) => apiCall('/portfolio/buy', { method: 'POST', body: stockData }),
+  sellStock: (stockData) => apiCall('/portfolio/sell', { method: 'POST', body: stockData }),
 };
 
-export default {
-  authAPI,
-  stockAPI,
-  portfolioAPI,
-};
+export default { authAPI, stockAPI, portfolioAPI };
