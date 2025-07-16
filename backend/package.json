@@ -1,11 +1,13 @@
 {
-  "name": "stock-market",
+  "name": "stock-market-backend",
   "version": "1.0.0",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "echo 'Backend build complete' && exit 0",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "vercel-build": "echo 'Vercel build complete'"
   },
   "keywords": [],
   "author": "",
@@ -18,10 +20,12 @@
     "dotenv": "^17.1.0",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.16.2",
-    "socket.io": "^4.7.5"
+    "mongoose": "^8.16.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
