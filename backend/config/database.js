@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 // MongoDB connection configuration
 const connectDB = async () => {
     try {
-        const conn = await mongoose.connect('mongodb://localhost:27017/Stockmarket', {
+        const conn = await mongoose.connect('mongodb+srv://aryankadam2952005:<ak123>@stockmarket.vzokkha.mongodb.net/?retryWrites=true&w=majority&appName=Stockmarket', {
             useNewUrlParser: true,
             useUnifiedTopology: true,
         });
@@ -53,7 +53,7 @@ const getDatabaseStats = async () => {
     } catch (error) {
         console.error('Error getting database stats:', error);
         return null;
-    }
+    }g
 };
 
 // Check if database is connected

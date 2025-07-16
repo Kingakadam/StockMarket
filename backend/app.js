@@ -1,9 +1,8 @@
 const express = require('express');
+const socketio = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const http = require('http');
-const socketIo = require('socket.io');
 const alphaVantageService = require('./services/alphaVantageService');
 const multiApiService = require('./services/multiApiService');
 const newsApiService = require('./services/newsApiService');
@@ -12,21 +11,21 @@ const userRoutes = require('./routes/userRoutes');
 require('dotenv').config();
 
 const app = express();
-const server = http.createServer(app);
-const io = socketIo(server, {
-    cors: {
-        origin: "http://localhost:3000",
-        methods: ["GET", "POST"]
-    }
-});
+
+// CORS configuration for Vercel
+app.use(cors({
+    origin: process.env.NODE_ENV === 'production' 
+        ? [process.env.FRONTEND_URL, 'https://your-frontend-domain.vercel.app']
+        : 'http://localhost:3000',
+    credentials: true
+}));
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 // Middleware
-app.use(cors());
 app.use(express.json());
-app.set('trust proxy', true); // Trust proxy for proper IP detection
+app.set('trust proxy', true);
 
 // Connect to MongoDB
 connectDB();
@@ -34,9 +33,7 @@ connectDB();
 // Routes
 app.use('/api/users', userRoutes);
 
-// User model is now imported from models/User.js
-
-// Stock Schema with real-time data fields
+// Stock Schema
 const stockSchema = new mongoose.Schema({
     symbol: {
         type: String,
@@ -173,25 +170,17 @@ app.get('/api/stats', async (req, res) => {
     }
 });
 
-// User authentication endpoints are now handled by userRoutes
-
-// Get stocks endpoint with real-time data
+// Get stocks endpoint
 app.get('/api/stocks', async (req, res) => {
     try {
         const { refresh } = req.query;
-
-        // Get stocks from database first
         let stocks = await Stock.find();
 
-        // If no stocks in database or refresh requested, fetch from Alpha Vantage
         if (stocks.length === 0 || refresh === 'true') {
-            console.log('Fetching real-time stock data from Alpha Vantage...');
-
+            console.log('Fetching real-time stock data...');
             const popularSymbols = alphaVantageService.getPopularStocks();
-            // Use multi-API service for better reliability
             const realTimeStocks = await multiApiService.getMultipleQuotes(popularSymbols);
 
-            // Update or create stocks in database
             for (const stockData of realTimeStocks) {
                 await Stock.findOneAndUpdate(
                     { symbol: stockData.symbol },
@@ -203,7 +192,6 @@ app.get('/api/stocks', async (req, res) => {
                 );
             }
 
-            // Fetch updated stocks from database
             stocks = await Stock.find();
         }
 
@@ -235,15 +223,11 @@ app.get('/api/stocks/search', async (req, res) => {
 app.get('/api/stocks/:symbol', async (req, res) => {
     try {
         const { symbol } = req.params;
-
-        // Try to get from database first
         let stock = await Stock.findOne({ symbol: symbol.toUpperCase() });
 
-        // If not in database or data is old (more than 5 minutes), fetch fresh data
         const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
         if (!stock || stock.lastUpdated < fiveMinutesAgo) {
             console.log(`Fetching fresh data for ${symbol}...`);
-
             const stockData = await alphaVantageService.getStockQuote(symbol.toUpperCase());
 
             stock = await Stock.findOneAndUpdate(
@@ -269,24 +253,16 @@ app.get('/api/stocks/:symbol/chart', async (req, res) => {
         const { symbol } = req.params;
         const { interval = '5min' } = req.query;
 
-        console.log(`Fetching chart data for ${symbol} with interval ${interval}`);
-
         try {
             const chartData = await alphaVantageService.getIntradayData(symbol.toUpperCase(), interval);
 
             if (chartData && chartData.length > 0) {
-                console.log(`Successfully fetched ${chartData.length} data points for ${symbol}`);
                 res.json(chartData);
             } else {
-                console.log(`No data from Alpha Vantage for ${symbol}, generating mock data`);
                 const mockData = generateMockChartData(symbol);
                 res.json(mockData);
             }
         } catch (apiError) {
-            console.log(`Alpha Vantage API error for ${symbol}:`, apiError.message);
-            console.log(`Generating mock data for ${symbol}`);
-
-            // Generate mock data as fallback
             const mockData = generateMockChartData(symbol);
             res.json(mockData);
         }
@@ -302,7 +278,6 @@ function generateMockChartData(symbol) {
     const now = new Date();
     const mockData = [];
 
-    // Base price varies by symbol
     const basePrices = {
         'AAPL': 175,
         'GOOGL': 2800,
@@ -313,13 +288,10 @@ function generateMockChartData(symbol) {
 
     const basePrice = basePrices[symbol] || 150;
 
-    // Generate 50 data points over the last 4 hours
     for (let i = 49; i >= 0; i--) {
-        const timestamp = new Date(now.getTime() - i * 5 * 60 * 1000); // 5 minutes apart
-
-        // Create realistic price movement
-        const volatility = basePrice * 0.02; // 2% volatility
-        const trend = Math.sin(i * 0.1) * volatility * 0.5; // Slight trend
+        const timestamp = new Date(now.getTime() - i * 5 * 60 * 1000);
+        const volatility = basePrice * 0.02;
+        const trend = Math.sin(i * 0.1) * volatility * 0.5;
         const randomWalk = (Math.random() - 0.5) * volatility;
         const price = basePrice + trend + randomWalk;
 
@@ -333,7 +305,6 @@ function generateMockChartData(symbol) {
         });
     }
 
-    console.log(`Generated ${mockData.length} mock data points for ${symbol}`);
     return mockData;
 }
 
@@ -394,14 +365,12 @@ app.get('/api/portfolio/:userId', authenticateToken, async (req, res) => {
     try {
         const { userId } = req.params;
 
-        // Verify user can only access their own portfolio
         if (req.user.id !== userId) {
             return res.status(403).json({ error: 'Access denied' });
         }
 
         const portfolio = await Portfolio.find({ userId });
 
-        // Calculate portfolio summary
         let totalValue = 0;
         let totalInvested = 0;
 
@@ -445,22 +414,18 @@ app.post('/api/portfolio/buy', authenticateToken, async (req, res) => {
         const { symbol, quantity, price } = req.body;
         const userId = req.user.id;
 
-        // Validate input
         if (!symbol || !quantity || !price || quantity <= 0 || price <= 0) {
             return res.status(400).json({ error: 'Invalid input data' });
         }
 
-        // Check if stock exists
         const stock = await Stock.findOne({ symbol });
         if (!stock) {
             return res.status(404).json({ error: 'Stock not found' });
         }
 
-        // Check if user already has this stock
         let portfolio = await Portfolio.findOne({ userId, symbol });
 
         if (portfolio) {
-            // Update existing holding
             const newQuantity = portfolio.quantity + quantity;
             const newTotalInvested = portfolio.totalInvested + (quantity * price);
             const newAveragePrice = newTotalInvested / newQuantity;
@@ -470,7 +435,6 @@ app.post('/api/portfolio/buy', authenticateToken, async (req, res) => {
             portfolio.averagePrice = newAveragePrice;
             portfolio.updatedAt = new Date();
         } else {
-            // Create new holding
             portfolio = new Portfolio({
                 userId,
                 symbol,
@@ -498,12 +462,10 @@ app.post('/api/portfolio/sell', authenticateToken, async (req, res) => {
         const { symbol, quantity, price } = req.body;
         const userId = req.user.id;
 
-        // Validate input
         if (!symbol || !quantity || !price || quantity <= 0 || price <= 0) {
             return res.status(400).json({ error: 'Invalid input data' });
         }
 
-        // Find user's holding
         const portfolio = await Portfolio.findOne({ userId, symbol });
         if (!portfolio) {
             return res.status(404).json({ error: 'Stock not found in portfolio' });
@@ -514,10 +476,8 @@ app.post('/api/portfolio/sell', authenticateToken, async (req, res) => {
         }
 
         if (portfolio.quantity === quantity) {
-            // Sell all shares - remove from portfolio
             await Portfolio.deleteOne({ userId, symbol });
         } else {
-            // Partial sell - update portfolio
             const remainingQuantity = portfolio.quantity - quantity;
             const soldValue = quantity * portfolio.averagePrice;
             const newTotalInvested = portfolio.totalInvested - soldValue;
@@ -540,63 +500,13 @@ app.post('/api/portfolio/sell', authenticateToken, async (req, res) => {
     }
 });
 
-// Socket.IO for real-time updates
-io.on('connection', (socket) => {
-    console.log('User connected:', socket.id);
-
-    socket.on('disconnect', () => {
-        console.log('User disconnected:', socket.id);
-    });
-});
-
-// Function to update stock prices with real Alpha Vantage data
-const updateStockPrices = async () => {
-    try {
-        const stocks = await Stock.find();
-
-        if (stocks.length === 0) {
-            console.log('No stocks in database to update');
-            return;
-        }
-
-        // Update one stock at a time to respect rate limits
-        const randomStock = stocks[Math.floor(Math.random() * stocks.length)];
-
-        try {
-            console.log(`Updating real-time data for ${randomStock.symbol}...`);
-            const updatedData = await alphaVantageService.getStockQuote(randomStock.symbol);
-
-            await Stock.findOneAndUpdate(
-                { symbol: randomStock.symbol },
-                {
-                    ...updatedData,
-                    lastUpdated: new Date()
-                }
-            );
-
-            // Get all updated stocks and emit to clients
-            const allStocks = await Stock.find();
-            io.emit('stockUpdate', allStocks);
-
-        } catch (error) {
-            console.error(`Failed to update ${randomStock.symbol}:`, error.message);
-        }
-
-    } catch (error) {
-        console.error('Error in updateStockPrices:', error);
-    }
-};
-
-// Update stock prices every 30 seconds (to respect Alpha Vantage rate limits)
-setInterval(updateStockPrices, 30000);
-
-// Initial stock data load
+// Initialize stocks function (moved from setInterval for serverless)
 const initializeStocks = async () => {
     try {
         const stockCount = await Stock.countDocuments();
         if (stockCount === 0) {
             console.log('Initializing stock data...');
-            const popularSymbols = alphaVantageService.getPopularStocks().slice(0, 5); // Start with 5 stocks
+            const popularSymbols = alphaVantageService.getPopularStocks().slice(0, 5);
             const initialStocks = await alphaVantageService.getMultipleQuotes(popularSymbols);
 
             for (const stockData of initialStocks) {
@@ -610,11 +520,23 @@ const initializeStocks = async () => {
     }
 };
 
-// Initialize stocks on server start
-initializeStocks();
-
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-    console.log(`Server started on port ${PORT}`);
-    console.log('Real-time stock updates enabled');
+// Initialize stocks on first request (cold start)
+let stocksInitialized = false;
+app.use(async (req, res, next) => {
+    if (!stocksInitialized) {
+        await initializeStocks();
+        stocksInitialized = true;
+    }
+    next();
 });
+
+// For local development
+if (process.env.NODE_ENV !== 'production') {
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+}
+
+// Export for Vercel
+module.exports = app;
